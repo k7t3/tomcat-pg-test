@@ -42,6 +42,10 @@ tomcat-pg-test/
 
 WAR ファイルは `app/build/libs/app-0.1.0-SNAPSHOT.war` に生成されます。
 
+## GitHub Release
+
+GitHub Release を `published` にすると、GitHub Actions の `Release WAR` ワークフローが `:app:war` を実行し、生成された WAR を Release asset として添付します。
+
 ## デプロイ
 
 生成された WAR を Tomcat 9 の `webapps/` に配置してください。

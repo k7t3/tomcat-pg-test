@@ -1,0 +1,36 @@
+name: Release WAR
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  release-war:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Build WAR
+        run: ./gradlew :app:war
+
+      - name: Upload WAR to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/libs/*.war
+          fail_on_unmatched_files: true
