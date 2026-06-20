@@ -10,13 +10,42 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Enumeration;
 
+/**
+ * サーバーおよびデータベース接続の状態を提供するヘルスチェックサーブレット。
+ *
+ * <p>{@code /health} エンドポイントへのGETリクエストに対して、
+ * アプリケーションサーバー情報、PostgreSQLデータベース接続状態、
+ * リバースプロキシのリクエストヘッダーを含むHTMLページを返します。</p>
+ *
+ * <p>データベース接続は {@code web.xml} またはTomcatコンテキストファイルで設定された
+ * {@code db.url}, {@code db.user}, {@code db.password} のコンテキストパラメータを使用してテストされます。</p>
+ *
+ * @author k7t3
+ * @since 0.1.0
+ */
 @WebServlet("/health")
 public class HealthCheckServlet extends HttpServlet {
 
+    /** データベースJDBC URLのコンテキストパラメータ名。 */
     static final String DB_URL_PARAM = "db.url";
+
+    /** データベースユーザーのコンテキストパラメータ名。 */
     static final String DB_USER_PARAM = "db.user";
+
+    /** データベースパスワードのコンテキストパラメータ名。 */
     static final String DB_PASSWORD_PARAM = "db.password";
 
+    /**
+     * HTTP GETリクエストを処理し、HTMLのヘルスチェックレポートを生成します。
+     *
+     * <p>レポートにはサーブレットコンテナ情報、データベース接続テスト結果、
+     * リバースプロキシのリクエストヘッダーが含まれます。</p>
+     *
+     * @param req HTTPリクエスト
+     * @param resp HTTPレスポンス
+     * @throws ServletException サーブレットエラーが発生した場合
+     * @throws IOException レスポンス書き込み時にI/Oエラーが発生した場合
+     */
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         resp.setContentType("text/html; charset=UTF-8");
@@ -89,6 +118,14 @@ public class HealthCheckServlet extends HttpServlet {
         out.println("</body></html>");
     }
 
+    /**
+     * サーブレットコンテキストからデータベース接続パラメータを解決します。
+     *
+     * <p>空文字または空白のみのパラメータ値は未設定として扱います。</p>
+     *
+     * @param servletContext 初期パラメータを含むサーブレットコンテキスト
+     * @return コンテキストパラメータから生成された {@link DatabaseConfiguration}
+     */
     DatabaseConfiguration resolveDatabaseConfiguration(javax.servlet.ServletContext servletContext) {
         return new DatabaseConfiguration(
                 trimToNull(servletContext.getInitParameter(DB_URL_PARAM)),
@@ -97,6 +134,12 @@ public class HealthCheckServlet extends HttpServlet {
         );
     }
 
+    /**
+     * 値が {@code null}、空文字、または空白のみの場合に {@code null} を返します。
+     *
+     * @param value トリムする入力文字列
+     * @return トリムされた文字列。空白の場合は {@code null}
+     */
     private String trimToNull(String value) {
         if (value == null) {
             return null;
@@ -105,6 +148,15 @@ public class HealthCheckServlet extends HttpServlet {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
+    /**
+     * XSSを防ぐためにHTML特殊文字をエスケープします。
+     *
+     * <p>以下の文字が置換されます:
+     * {@code &}, {@code <}, {@code >}, {@code "}</p>
+     *
+     * @param input 生の入力文字列（{@code null} 可）
+     * @return HTMLエスケープされた文字列。入力が {@code null} の場合は空文字列
+     */
     private String escapeHtml(String input) {
         if (input == null) return "";
         return input
@@ -114,7 +166,19 @@ public class HealthCheckServlet extends HttpServlet {
                 .replace("\"", "&quot;");
     }
 
+    /**
+     * サーブレットコンテキストの初期パラメータから抽出されたデータベース接続パラメータを保持するレコード。
+     *
+     * @param url JDBC URL（未設定の場合は {@code null}）
+     * @param user データベースユーザー名
+     * @param password データベースパスワード
+     */
     record DatabaseConfiguration(String url, String user, String password) {
+        /**
+         * URLパラメータをチェックしてデータベースが設定済みかどうかを返します。
+         *
+         * @return URLがnullでない場合は {@code true}
+         */
         boolean isConfigured() {
             return url != null;
         }

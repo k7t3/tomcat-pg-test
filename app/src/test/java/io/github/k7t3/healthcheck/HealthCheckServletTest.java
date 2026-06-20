@@ -8,8 +8,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+/**
+ * {@link HealthCheckServlet} のユニットテスト。
+ *
+ * <p>サーブレットコンテキストの初期パラメータからのデータベース設定解決を検証します。</p>
+ */
 class HealthCheckServletTest {
 
+    /**
+     * 3つのデータベース接続パラメータがサーブレットコンテキストの
+     * 初期パラメータから正しく読み取られることを検証します。
+     */
     @Test
     void readsDatabaseConfigurationFromServletContextInitParameters() {
         var servletContext = mock(ServletContext.class);
@@ -26,6 +35,10 @@ class HealthCheckServletTest {
         assertThat(dbConfig.password()).isEqualTo("secret");
     }
 
+    /**
+     * 空白または空白のみのデータベースURLが未設定として扱われ、
+     * {@code isConfigured()} が {@code false} を返すことを検証します。
+     */
     @Test
     void treatsBlankDatabaseUrlAsMissingConfiguration() {
         var servletContext = mock(ServletContext.class);
