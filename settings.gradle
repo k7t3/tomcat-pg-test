@@ -1,0 +1,3 @@
+rootProject.name = 'tomcat-pg-test'
+
+include 'app'
