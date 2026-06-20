@@ -6,8 +6,6 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Enumeration;
@@ -15,10 +13,14 @@ import java.util.Enumeration;
 @WebServlet("/health")
 public class HealthCheckServlet extends HttpServlet {
 
+    static final String DB_URL_PARAM = "db.url";
+    static final String DB_USER_PARAM = "db.user";
+    static final String DB_PASSWORD_PARAM = "db.password";
+
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         resp.setContentType("text/html; charset=UTF-8");
-        PrintWriter out = resp.getWriter();
+        var out = resp.getWriter();
 
         out.println("<!DOCTYPE html>");
         out.println("<html><head><title>Health Check</title></head><body>");
@@ -34,19 +36,17 @@ public class HealthCheckServlet extends HttpServlet {
 
         // Database connectivity
         out.println("<h2>Database Connectivity</h2>");
-        String dbUrl = System.getenv("DB_URL");
-        String dbUser = System.getenv("DB_USER");
-        String dbPassword = System.getenv("DB_PASSWORD");
+        var dbConfig = resolveDatabaseConfiguration(getServletContext());
 
-        if (dbUrl == null || dbUrl.isEmpty()) {
-            out.println("<p style='color:orange'>DB_URL environment variable is not set. Skipping database check.</p>");
+        if (!dbConfig.isConfigured()) {
+            out.println("<p style='color:orange'>Database is not configured. Set application context parameters db.url, db.user, and db.password.</p>");
         } else {
             try {
                 Class.forName("org.postgresql.Driver");
-                try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
-                    boolean valid = conn.isValid(5);
+                try (var conn = DriverManager.getConnection(dbConfig.url(), dbConfig.user(), dbConfig.password())) {
+                    var valid = conn.isValid(5);
                     out.println("<p style='color:green'>Database connection: " + (valid ? "OK" : "FAILED") + "</p>");
-                    out.println("<p>Connected to: " + dbUrl + "</p>");
+                    out.println("<p>Connected to: " + dbConfig.url() + "</p>");
                 }
             } catch (ClassNotFoundException e) {
                 out.println("<p style='color:red'>PostgreSQL JDBC Driver not found: " + e.getMessage() + "</p>");
@@ -89,6 +89,22 @@ public class HealthCheckServlet extends HttpServlet {
         out.println("</body></html>");
     }
 
+    DatabaseConfiguration resolveDatabaseConfiguration(javax.servlet.ServletContext servletContext) {
+        return new DatabaseConfiguration(
+                trimToNull(servletContext.getInitParameter(DB_URL_PARAM)),
+                trimToNull(servletContext.getInitParameter(DB_USER_PARAM)),
+                trimToNull(servletContext.getInitParameter(DB_PASSWORD_PARAM))
+        );
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        var trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     private String escapeHtml(String input) {
         if (input == null) return "";
         return input
@@ -96,5 +112,11 @@ public class HealthCheckServlet extends HttpServlet {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;");
+    }
+
+    record DatabaseConfiguration(String url, String user, String password) {
+        boolean isConfigured() {
+            return url != null;
+        }
     }
 }
