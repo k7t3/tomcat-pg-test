@@ -140,7 +140,7 @@ public class HealthCheckServlet extends HttpServlet {
      * @param value トリムする入力文字列
      * @return トリムされた文字列。空白の場合は {@code null}
      */
-    private String trimToNull(String value) {
+    String trimToNull(String value) {
         if (value == null) {
             return null;
         }
@@ -157,7 +157,7 @@ public class HealthCheckServlet extends HttpServlet {
      * @param input 生の入力文字列（{@code null} 可）
      * @return HTMLエスケープされた文字列。入力が {@code null} の場合は空文字列
      */
-    private String escapeHtml(String input) {
+    String escapeHtml(String input) {
         if (input == null) return "";
         return input
                 .replace("&", "&amp;")
