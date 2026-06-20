@@ -6,9 +6,13 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
 
 /**
  * サーバーおよびデータベース接続の状態を提供するヘルスチェックサーブレット。
@@ -76,6 +80,15 @@ public class HealthCheckServlet extends HttpServlet {
                     var valid = conn.isValid(5);
                     out.println("<p style='color:green'>Database connection: " + (valid ? "OK" : "FAILED") + "</p>");
                     out.println("<p>Connected to: " + dbConfig.url() + "</p>");
+
+                    if (valid) {
+                        try {
+                            var tables = fetchTableMetadata(conn);
+                            renderTableMetadata(out, tables);
+                        } catch (SQLException e) {
+                            out.println("<p style='color:red'>Failed to fetch table metadata: " + escapeHtml(e.getMessage()) + "</p>");
+                        }
+                    }
                 }
             } catch (ClassNotFoundException e) {
                 out.println("<p style='color:red'>PostgreSQL JDBC Driver not found: " + e.getMessage() + "</p>");
@@ -165,6 +178,101 @@ public class HealthCheckServlet extends HttpServlet {
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;");
     }
+
+    /**
+     * データベース接続からテーブルメタデータを取得します。
+     *
+     * <p>{@code information_schema.tables} からpublicスキーマのベーステーブル一覧を取得し、
+     * 各テーブルについて {@code information_schema.columns} からカラム情報を取得します。</p>
+     *
+     * @param conn データベース接続
+     * @return テーブル情報のリスト（テーブルが存在しない場合は空リスト）
+     * @throws SQLException データベースクエリが失敗した場合
+     */
+    List<TableInfo> fetchTableMetadata(Connection conn) throws SQLException {
+        var tablesSql = """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+                """;
+
+        var columnsSql = """
+                SELECT column_name, data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = ?
+                ORDER BY ordinal_position
+                """;
+
+        var tables = new ArrayList<TableInfo>();
+
+        try (var stmt = conn.prepareStatement(tablesSql);
+             var rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                var tableName = rs.getString("table_name");
+                var columns = new ArrayList<ColumnInfo>();
+
+                try (var colStmt = conn.prepareStatement(columnsSql)) {
+                    colStmt.setString(1, tableName);
+                    try (var colRs = colStmt.executeQuery()) {
+                        while (colRs.next()) {
+                            columns.add(new ColumnInfo(
+                                    colRs.getString("column_name"),
+                                    colRs.getString("data_type"),
+                                    "YES".equals(colRs.getString("is_nullable"))
+                            ));
+                        }
+                    }
+                }
+                tables.add(new TableInfo(tableName, columns));
+            }
+        }
+        return tables;
+    }
+
+    /**
+     * テーブルメタデータをHTMLとしてレンダリングします。
+     *
+     * <p>テーブル一覧と各テーブルのカラム情報（名前、型、NULL許可）を表示します。
+     * テーブルが存在しない場合はその旨を表示します。</p>
+     *
+     * @param out    HTML出力先
+     * @param tables 表示するテーブル情報のリスト
+     */
+    void renderTableMetadata(PrintWriter out, List<TableInfo> tables) {
+        out.println("<h2>Database Tables</h2>");
+        if (tables.isEmpty()) {
+            out.println("<p>No tables found in public schema.</p>");
+            return;
+        }
+        for (var table : tables) {
+            out.println("<h3>" + escapeHtml(table.tableName()) + "</h3>");
+            out.println("<table border='1'><tr><th>Column</th><th>Type</th><th>Nullable</th></tr>");
+            for (var col : table.columns()) {
+                out.println("<tr><td>" + escapeHtml(col.columnName()) + "</td>"
+                        + "<td>" + escapeHtml(col.dataType()) + "</td>"
+                        + "<td>" + (col.nullable() ? "YES" : "NO") + "</td></tr>");
+            }
+            out.println("</table>");
+        }
+    }
+
+    /**
+     * テーブルの1カラムに関するメタデータ。
+     *
+     * @param columnName カラム名
+     * @param dataType   データ型
+     * @param nullable   NULL許容
+     */
+    record ColumnInfo(String columnName, String dataType, boolean nullable) {}
+
+    /**
+     * 1テーブルに関するメタデータ。
+     *
+     * @param tableName テーブル名
+     * @param columns   カラム情報のリスト
+     */
+    record TableInfo(String tableName, List<ColumnInfo> columns) {}
 
     /**
      * サーブレットコンテキストの初期パラメータから抽出されたデータベース接続パラメータを保持するレコード。

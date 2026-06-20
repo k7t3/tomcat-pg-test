@@ -1,5 +1,6 @@
 package io.github.k7t3.healthcheck;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -8,10 +9,15 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 class HealthCheckServletTest {
@@ -320,6 +326,207 @@ class HealthCheckServletTest {
 
             assertThat(content).contains("Remote Address: 192.168.0.1");
             assertThat(content).contains("Scheme: https");
+        }
+
+        @Test
+        @DisplayName("Should not render table section when database is not configured")
+        void doesNotRenderTableSectionWhenDatabaseNotConfigured() throws Exception {
+            var servletContext = mock(ServletContext.class);
+            when(servletContext.getServerInfo()).thenReturn("Test");
+
+            var request = defaultRequest();
+
+            var content = executeDoGet(servletContext, request);
+
+            assertThat(content).doesNotContain("Database Tables");
+        }
+    }
+
+    // ============================================================
+    // fetchTableMetadata
+    // ============================================================
+
+    @Nested
+    @DisplayName("fetchTableMetadata")
+    class FetchTableMetadata {
+
+        @Test
+        @DisplayName("Should return empty list when no tables exist")
+        void shouldReturnEmptyListWhenNoTablesExist() throws SQLException {
+            var conn = mock(Connection.class);
+            var tablesPstmt = mock(PreparedStatement.class);
+            var tablesRs = mock(ResultSet.class);
+
+            when(conn.prepareStatement(startsWith("SELECT table_name"))).thenReturn(tablesPstmt);
+            when(tablesPstmt.executeQuery()).thenReturn(tablesRs);
+            when(tablesRs.next()).thenReturn(false);
+
+            var servlet = new HealthCheckServlet();
+            var result = servlet.fetchTableMetadata(conn);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should return tables with their columns")
+        void shouldReturnTablesWithColumns() throws SQLException {
+            var conn = mock(Connection.class);
+            var tablesPstmt = mock(PreparedStatement.class);
+            var tablesRs = mock(ResultSet.class);
+            var colsPstmt = mock(PreparedStatement.class);
+            var usersColsRs = mock(ResultSet.class);
+            var ordersColsRs = mock(ResultSet.class);
+
+            when(conn.prepareStatement(startsWith("SELECT table_name"))).thenReturn(tablesPstmt);
+            when(conn.prepareStatement(startsWith("SELECT column_name"))).thenReturn(colsPstmt);
+
+            when(tablesPstmt.executeQuery()).thenReturn(tablesRs);
+            when(tablesRs.next()).thenReturn(true, true, false);
+            when(tablesRs.getString("table_name")).thenReturn("users", "orders");
+
+            when(colsPstmt.executeQuery()).thenReturn(usersColsRs, ordersColsRs);
+
+            // users columns: id (integer, NO), name (varchar, YES)
+            when(usersColsRs.next()).thenReturn(true, true, false);
+            when(usersColsRs.getString("column_name")).thenReturn("id", "name");
+            when(usersColsRs.getString("data_type")).thenReturn("integer", "character varying");
+            when(usersColsRs.getString("is_nullable")).thenReturn("NO", "YES");
+
+            // orders columns: order_id (bigint, NO), total (numeric, YES)
+            when(ordersColsRs.next()).thenReturn(true, true, false);
+            when(ordersColsRs.getString("column_name")).thenReturn("order_id", "total");
+            when(ordersColsRs.getString("data_type")).thenReturn("bigint", "numeric");
+            when(ordersColsRs.getString("is_nullable")).thenReturn("NO", "YES");
+
+            var servlet = new HealthCheckServlet();
+            var result = servlet.fetchTableMetadata(conn);
+
+            assertThat(result).hasSize(2);
+
+            assertThat(result.get(0).tableName()).isEqualTo("users");
+            assertThat(result.get(0).columns()).hasSize(2);
+            assertThat(result.get(0).columns().get(0).columnName()).isEqualTo("id");
+            assertThat(result.get(0).columns().get(0).dataType()).isEqualTo("integer");
+            assertThat(result.get(0).columns().get(0).nullable()).isFalse();
+            assertThat(result.get(0).columns().get(1).columnName()).isEqualTo("name");
+            assertThat(result.get(0).columns().get(1).dataType()).isEqualTo("character varying");
+            assertThat(result.get(0).columns().get(1).nullable()).isTrue();
+
+            assertThat(result.get(1).tableName()).isEqualTo("orders");
+            assertThat(result.get(1).columns()).hasSize(2);
+
+            verify(colsPstmt).setString(1, "users");
+            verify(colsPstmt).setString(1, "orders");
+        }
+
+        @Test
+        @DisplayName("Should propagate SQLException from tables query")
+        void shouldPropagateSQLExceptionFromTablesQuery() throws SQLException {
+            var conn = mock(Connection.class);
+            var tablesPstmt = mock(PreparedStatement.class);
+
+            when(conn.prepareStatement(startsWith("SELECT table_name"))).thenReturn(tablesPstmt);
+            when(tablesPstmt.executeQuery()).thenThrow(new SQLException("Connection lost"));
+
+            var servlet = new HealthCheckServlet();
+
+            assertThatThrownBy(() -> servlet.fetchTableMetadata(conn))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("Connection lost");
+        }
+
+        @Test
+        @DisplayName("Should propagate SQLException from columns query")
+        void shouldPropagateSQLExceptionFromColumnsQuery() throws SQLException {
+            var conn = mock(Connection.class);
+            var tablesPstmt = mock(PreparedStatement.class);
+            var tablesRs = mock(ResultSet.class);
+            var colsPstmt = mock(PreparedStatement.class);
+
+            when(conn.prepareStatement(startsWith("SELECT table_name"))).thenReturn(tablesPstmt);
+            when(conn.prepareStatement(startsWith("SELECT column_name"))).thenReturn(colsPstmt);
+
+            when(tablesPstmt.executeQuery()).thenReturn(tablesRs);
+            when(tablesRs.next()).thenReturn(true, false);
+            when(tablesRs.getString("table_name")).thenReturn("users");
+
+            when(colsPstmt.executeQuery()).thenThrow(new SQLException("Column query failed"));
+
+            var servlet = new HealthCheckServlet();
+
+            assertThatThrownBy(() -> servlet.fetchTableMetadata(conn))
+                    .isInstanceOf(SQLException.class)
+                    .hasMessageContaining("Column query failed");
+        }
+    }
+
+    // ============================================================
+    // renderTableMetadata
+    // ============================================================
+
+    @Nested
+    @DisplayName("renderTableMetadata")
+    class RenderTableMetadata {
+
+        @Test
+        @DisplayName("Should render no-tables message when table list is empty")
+        void shouldRenderNoTablesMessageWhenEmpty() {
+            var stringWriter = new StringWriter();
+            var out = new PrintWriter(stringWriter);
+
+            new HealthCheckServlet().renderTableMetadata(out, List.of());
+
+            var content = stringWriter.toString();
+            assertThat(content).contains("No tables found");
+        }
+
+        @Test
+        @DisplayName("Should render all tables with column details")
+        void shouldRenderAllTablesWithColumnDetails() {
+            var stringWriter = new StringWriter();
+            var out = new PrintWriter(stringWriter);
+
+            var columns = List.of(
+                    new HealthCheckServlet.ColumnInfo("id", "integer", false),
+                    new HealthCheckServlet.ColumnInfo("name", "character varying", true)
+            );
+            var tables = List.of(
+                    new HealthCheckServlet.TableInfo("users", columns)
+            );
+
+            new HealthCheckServlet().renderTableMetadata(out, tables);
+
+            var content = stringWriter.toString();
+            assertThat(content).contains("Database Tables");
+            assertThat(content).contains("users");
+            assertThat(content).contains("<td>id</td>");
+            assertThat(content).contains("<td>integer</td>");
+            assertThat(content).contains("<td>NO</td>");
+            assertThat(content).contains("<td>name</td>");
+            assertThat(content).contains("<td>character varying</td>");
+            assertThat(content).contains("<td>YES</td>");
+        }
+
+        @Test
+        @DisplayName("Should escape HTML in table and column names")
+        void shouldEscapeHtmlInNames() {
+            var stringWriter = new StringWriter();
+            var out = new PrintWriter(stringWriter);
+
+            var columns = List.of(
+                    new HealthCheckServlet.ColumnInfo("<script>", "int", false)
+            );
+            var tables = List.of(
+                    new HealthCheckServlet.TableInfo("<evil>", columns)
+            );
+
+            new HealthCheckServlet().renderTableMetadata(out, tables);
+
+            var content = stringWriter.toString();
+            assertThat(content).contains("&lt;script&gt;");
+            assertThat(content).contains("&lt;evil&gt;");
+            assertThat(content).doesNotContain("<script>");
+            assertThat(content).doesNotContain("<evil>");
         }
     }
 }
