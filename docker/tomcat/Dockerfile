@@ -6,7 +6,7 @@ RUN gradle :app:war --no-daemon
 
 FROM tomcat:9.0-jdk21-temurin
 
-COPY --from=builder /workspace/app/build/libs/app-0.1.0-SNAPSHOT.war /usr/local/tomcat/webapps/ROOT.war
+COPY --from=builder /workspace/app/build/libs/app-fat.war /usr/local/tomcat/webapps/ROOT.war
 COPY docker/tomcat/run-tomcat.sh /usr/local/bin/run-tomcat.sh
 
 RUN chmod +x /usr/local/bin/run-tomcat.sh

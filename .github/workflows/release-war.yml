@@ -1,4 +1,4 @@
-name: Release WAR
+name: Build and Release Fat WAR
 
 on:
   release:
@@ -7,9 +7,10 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
-  release-war:
+  build-and-release:
     runs-on: ubuntu-latest
 
     steps:
@@ -26,11 +27,15 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: Build WAR
+      - name: Build Fat WAR
         run: ./gradlew :app:war
 
-      - name: Upload WAR to GitHub Release
+      - name: Verify Fat WAR includes dependencies
+        run: jar tf app/build/libs/app-fat.war | grep "WEB-INF/lib/.*\.jar$"
+
+      - name: Upload Fat WAR to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/libs/*.war
+          files: app/build/libs/app-fat.war
           fail_on_unmatched_files: true
+          name: ${{ github.event.release.name || github.ref_name }}

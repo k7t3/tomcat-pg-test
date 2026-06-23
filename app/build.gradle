@@ -3,10 +3,17 @@ plugins {
 }
 
 dependencies {
-    // Tomcat 9 (Java EE / javax.servlet)
     compileOnly 'javax.servlet:javax.servlet-api:4.0.1'
     testImplementation 'javax.servlet:javax.servlet-api:4.0.1'
 
-    // PostgreSQL JDBC Driver
     implementation 'org.postgresql:postgresql:42.7.11'
+}
+
+war {
+    archiveFileName = 'app-fat.war'
+
+    from(configurations.runtimeClasspath) {
+        into 'WEB-INF/lib'
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
 }
